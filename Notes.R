@@ -1,7 +1,6 @@
 ## NOTEPAD 
 
-## shinydoc with leaflet map + year selector for data shown + 
- # geom_line? or histogram highlighting summary of year show + all years
+
 
 # so from Census we have: 
 # percent of households receiving foodstamp that are below the poverty level
@@ -13,3 +12,12 @@
 # probably a simple linear model 
 
 # ratio SNAP::poverty for each county
+
+# look at individual disasters (disasterNumber)
+
+## shinydoc with leaflet map + year selector for data shown + 
+# geom_line? or histogram highlighting summary of year show + all years
+
+## QUIESTIONS/TASKS ##
+
+# 1 - Compare poverty and snap rates across counties in TX that received major housing assistance declarations 

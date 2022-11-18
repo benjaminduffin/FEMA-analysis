@@ -6,8 +6,9 @@
 
 library(censusapi) # census api wrapper
 library(dotenv) # hide api with .env
-library(httr)
-
+library(httr) # GET requests
+library(tigris) # Census TIGER shapefiles as sf objects 
+library(sf)
 
 
 ## Load .env
@@ -15,6 +16,8 @@ load_dot_env(".env")
 
 # Gather data -------------------------------------------------------------
 
+
+# Census Data -------------------------------------------------------------
 
 
 t <- censusapi::listCensusApis()
@@ -49,11 +52,20 @@ for (i in 1:length(years)) {
 
 all_years <- do.call(rbind, year_list)
 
-## Total population by county
-# also need the total population of each county
+## Write file 
+write.csv(all_years, here::here("data", paste0("Census_pov_snap_pop_", Sys.Date(), ".csv")))
 
 
-# FEMA DATA ---------------------------------------------------------------
+# Geographies -------------------------------------------------------------
+
+# Need TX counties 
+tx_counties <- tigris::counties(state = "48", 
+                                cb = TRUE)
+
+# write sf object 
+st_write(tx_counties, here::here("data", "TX_counties.shp"))
+
+# FEMA Data ---------------------------------------------------------------
 
 
 # FEMA URL
@@ -62,11 +74,12 @@ fema_url <- "https://www.fema.gov/api/open/v1/FemaWebDeclarationAreas.csv"
 # send get request using httr::GET to fema url
 ha <- GET(fema_url)
 
-ha_data <- content(ha, "parsed") # large data chunk, all together
+# grab response content to df
+ha_data <- content(ha, "parsed") # large data chunk
 # take a quick look at missingness 
 sumNA(ha_data)
 
-# grab years of interest 
+# years of interest 
 years_sub <- as.character(2015:2020)
 
 # subset the data so it is much smaller 
