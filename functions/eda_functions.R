@@ -32,15 +32,16 @@ sumNA <- function(...) {
     
     ###################################################################### - need to work on the second part 
   } else { # multiple vectors 
-    #vec_list <- tibble::lst(dlr$SAFIS_DEALER_RPT_ID, dlr$DEALER_TICKET_NO)
-    vec_list <- list(...)
-    res <- lapply(vec_list, function(x) {
-      sum_na <- sum(is.na(x))
-      tot_recs <- length(x)
-      perc_na <- round(sum_na / tot_recs, 2)
-      na_df <- data.frame(t(c(sum_na, perc_na)))
-      #names(na_df) <- c("n_NA", "perc_NA")
-    })
+    message("Input must be a data frame")
+    #   #vec_list <- tibble::lst(dlr$SAFIS_DEALER_RPT_ID, dlr$DEALER_TICKET_NO)
+    # vec_list <- list(...)
+    # res <- lapply(vec_list, function(x) {
+    #   sum_na <- sum(is.na(x))
+    #   tot_recs <- length(x)
+    #   perc_na <- round(sum_na / tot_recs, 2)
+    #   na_df <- data.frame(t(c(sum_na, perc_na)))
+    #   #names(na_df) <- c("n_NA", "perc_NA")
+    # })
     
     #bind_rows(res) 
   }
