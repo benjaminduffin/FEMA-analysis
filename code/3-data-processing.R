@@ -35,9 +35,9 @@ source(here::here("functions", "eda_functions.R"))
 
 
 # quick exploration of merge variables 
-head(tx_cnty) # COUNTYFP
-head(ha) # substr of the placeCode
-head(pov_snap) # substr of the GEO_ID
+glimpse(tx_cnty) # COUNTYFP
+glimpse(ha) # substr of the placeCode
+glimpse(pov_snap) # substr of the GEO_ID
 
 ## prep merge variables 
 
@@ -61,11 +61,48 @@ census_ha <- merge(pov_snap,
 # ended up with some dupes? nope, those are multiple disasters in one year for same county
 t <- census_ha[duplicated(census_ha[c("year", "county_code")]) | duplicated(census_ha[, c("year", "county_code")], fromLast = T), ]
 
+# so let's see about how many counties had multiple disasters per year 
+mult_dis <- census_ha %>%
+  filter(!is.na(disasterNumber)) %>%
+  group_by(county_code, year) %>%
+  summarize(n_disasters = n_distinct(disasterNumber), 
+            disasters = paste(unique(disasterNumber), collapse = ", ")) %>%
+  filter(n_disasters > 1)
+
 
 # merge in the geometries 
 fin_dat <- merge(census_ha, tx_cnty, 
                  by.x = "county_code", 
                  by.y = "COUNTYFP")
+
+# we could actually make the data a little wider?
+# or just make a merged dataset for each disaster 
+disaster_geos <- fin_dat %>% 
+  group_by(disasterNumber) %>%
+  summarize(geometry = st_union(geometry))
+
+plot(disaster_geos$geometry)
+
+
+# Derive variables --------------------------------------------------------
+
+fin_dat <- fin_dat %>% 
+  mutate(pov_rate = S2201_C01_021E / S2201_C01_001E, 
+         snap_rate = S2201_C03_001E / S2201_C01_001E, 
+         pov_snap_perc_ratio = pov_rate / snap_rate, 
+         pov_snap_ratio = S2201_C01_021E / S2201_C03_001E)
+
+hist(fin_dat$pov_rate)
+hist(fin_dat$snap_rate)
+hist(fin_dat$snap_pov_ratio)
+
+ggplot(data = fin_dat) + 
+  geom_boxplot(aes(y = pov_snap_ratio))
+
+
+ggplot(data = fin_dat[!is.na(fin_dat$disasterNumber), ]) + 
+  geom_point(aes(x = pov_rate, y = snap_rate)) +
+  geom_abline(aes(intercept = 0, slope = 1), color = 'red')
 
 # EDA ---------------------------------------------------------------------
 
@@ -89,6 +126,6 @@ ha %>%
 table(duplicated(ha[, c("placeCode", "disasterNumber")]))
 
 
-# Calculating variables  --------------------------------------------------
+
 
 

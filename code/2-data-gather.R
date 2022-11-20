@@ -8,13 +8,12 @@ library(censusapi) # census api wrapper
 library(dotenv) # hide api with .env
 library(httr) # GET requests
 library(tigris) # Census TIGER shapefiles as sf objects 
-library(sf)
+library(sf) # spatial manipulation
+library(rfema) # FEMA api wrapper
 
 
 ## Load .env
 load_dot_env(".env")
-
-# Gather data -------------------------------------------------------------
 
 
 # Census Data -------------------------------------------------------------
@@ -66,9 +65,8 @@ tx_counties <- tigris::counties(state = "48",
 st_write(tx_counties, here::here("data", "TX_counties.shp"))
 
 # FEMA Data ---------------------------------------------------------------
-
-
 # FEMA URL
+# simple GET
 fema_url <- "https://www.fema.gov/api/open/v1/FemaWebDeclarationAreas.csv"
 
 # send get request using httr::GET to fema url
@@ -86,6 +84,34 @@ years_sub <- as.character(2015:2020)
 ha_data_sub <- subset(ha_data, 
                       programTypeCode == "HA" & stateCode == "TX" & 
                         substr(designatedDate, 1, 4) %in% years_sub)
+
+## or using the rfema wrapper 
+
+fema_filters <- list(programTypeCode = "HA", 
+                     stateCode = "TX", 
+                     designatedDate = "> 2015-01-01",
+                     designatedDate = "< 2021-01-01")
+
+
+fema_dec_areas <- open_fema(data_set = "FemaWebDeclarationAreas", 
+                            filters = fema_filters)
+
+# also interested in what the declaration was 
+# emaWebDisasterDeclarations DisasterDeclarationsSummaries
+
+# emaWebDisasterDeclarations DisasterDeclarationsSummaries
+
+fema_disasters <- open_fema(data_set = "DisasterDeclarationsSummaries")
+
+disaster_numbers <- unique(fema_dec_areas$disasterNumber)
+disaster_numbers <- as.character(c(4269, 4223, 4332, 4272, 4245, 4377, 4454, 4466, 4266))
+
+
+disasters_sub <- subset(fema_disasters, disasterNumber %in% disaster_numbers)
+head(disasters_sub)
+
+unique(disasters_sub[]
+
 
 # write file
 write.csv(ha_data_sub, here::here("data", paste0("FEMA_HA_Decs_", Sys.Date(), ".csv")))

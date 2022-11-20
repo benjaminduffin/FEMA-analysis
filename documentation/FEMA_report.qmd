@@ -1,0 +1,150 @@
+---
+title: "Poverty and Snap in HA Declarations"
+author: "Ben Duffin"
+format: 
+  html: 
+    page-layout: full
+    code-fold: true
+    code-overflow: wrap
+    code-tools: true
+    code-block-bg: true
+    code-block-border-left: true
+    toc: true
+    theme: yeti
+    
+execute: 
+  warning: false
+  message: false
+---
+# Year range, etc? 
+
+# zephyr, sandstone, cosmo, yeti
+
+# Comparing Poverty and Supplemental Nutrition Assistance Program (SNAP) Rates 
+
+What is the relationship between poverty and Supplemental Nutrition Assistance Program (SNAP) rates across counties in Texas that received Major Housing Assistance (HA) declarations? It may not be as straight-forward as it seems, but this document seeks to provide insight into the communities impacted by disasters by attempting to answer the above question, plus a few more: 
+
+* Are these two characteristics correlated? If so, in which direction and how strongly? 
+* How might an increase in poverty rates effect SNAP Benefit rates? 
+* What are other methods to make this comparison? 
+
+
+
+# But First, Data Prep 
+
+```{r loadlibs}
+#| message: false
+#| warning: false
+library(rfema)
+library(censusapi)
+library(dotenv)
+library(dplyr) 
+library(ggplot2) 
+library(plotly) 
+library(sf)
+```
+
+Data used in this exercise come from multiple sources, but are primarily FEMA and Census data. 
+
+* **FEMA Declarations** - all federally declared disasters, beginning in 1953
+* **FEMA Declaration Summaries** - to give some context to the HA declarations
+* **Census 5-year ACS** - annual economic, demographic, and housing survey data estimated from multi-year time periods
+* **TIGER/Line Geographies** - in this case, for TX counties
+
+
+## FEMA Data
+
+FEMA Data are accessed using the R package {rfema}. This package provides a convenient wrapper for FEMA's open API. We can see below how many counties are impacted by each disaster we have for the TX data. 
+
+```{r femapull}
+
+## Declarations 
+# set up filters for the FEMA data 
+fema_filters <- list(programTypeCode = "HA", 
+                     stateCode = "TX", 
+                     designatedDate = "> 2015-01-01",
+                     designatedDate = "< 2021-01-01")
+
+# send request to the API
+fema_dec_areas <- open_fema(data_set = "FemaWebDeclarationAreas", 
+                            filters = fema_filters)
+
+## Declaration summaries 
+# set up the filter
+disaster_numbers <- list(disasterNumber = unique(fema_dec_areas$disasterNumber))
+
+
+# pull the filtered summaries 
+fema_disasters <- open_fema(data_set = "DisasterDeclarationsSummaries", 
+                            filter = disaster_numbers)
+
+# quick look to see what we have 
+table(fema_disasters$disasterNumber)
+
+```
+
+
+## Census Data 
+
+Fortunately, there are also packages ({censusapi}, {tigris}) that makes it really easy to pull data via the Census APIs. 
+
+The first part of this requires a key, so we'll load that quickly using `load_dot_env(".env")` to load the .env so we can access it using the `Sys.getenv("CENSUS_KEY")` I set up previously. 
+
+We'll pull 2015-2020 data (as we did with FEMA info), but need to specify the years in loop since the dates aren't included as a variable. 
+
+```{r censuspull}
+
+load_dot_env(".env")
+# Place to save the results 
+year_list <- list()
+
+# years of interest
+years <- seq(2015,2020, 1)
+
+# loop send GET request for each year and adds it to the list 
+for (i in 1:length(years)) {
+  
+  year_i <- years[i]
+  
+  x <- getCensus(name = "acs/acs5/subject", 
+                 vintage = year_i, 
+                 key = Sys.getenv("CENSUS_KEY"),  # NEED KEY 
+                 vars = c("GEO_ID", "S2201_C01_021E", "S2201_C01_021EA", "S2201_C03_001E", "S2201_C03_001EA", "S2201_C01_001E", "S2201_C01_001EA"), 
+                 region = "county:*",
+                 regionin = "state:48",
+                 show_call = F)
+  
+  x$year <- year_i
+  
+  year_list[[i]] <- x
+}
+
+# combine to one dataframe
+all_years <- do.call(rbind, year_list)
+
+```
+
+Then we can pull the county shapefile from the TIGER API and put a quick plot together to make sure things look okay. 
+
+```{r tigerpull, fig.width=8}
+#| message: false
+#| results: hide
+# specify the state - TX = 48
+tx_counties <- tigris::counties(state = "48", 
+                                cb = TRUE)
+
+# quick plot 
+ggplot(data = tx_counties) + 
+  geom_sf() + 
+  theme_minimal()
+
+```
+
+You can add options to executable code like this 
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
