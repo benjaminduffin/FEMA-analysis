@@ -3,6 +3,8 @@ title: "Poverty and Snap in HA Declarations"
 author: "Ben Duffin"
 format: 
   html: 
+    theme: yeti
+    fontsize: large
     page-layout: full
     code-fold: true
     code-overflow: wrap
@@ -10,17 +12,15 @@ format:
     code-block-bg: true
     code-block-border-left: true
     toc: true
-    theme: yeti
-    
+    smooth-scroll: true  
+    df-print: paged
+    embed-resources: true
 execute: 
   warning: false
   message: false
 ---
-# Year range, etc? 
 
-# zephyr, sandstone, cosmo, yeti
-
-# Comparing Poverty and Supplemental Nutrition Assistance Program (SNAP) Rates 
+# Poverty, SNAP, and Housing Assistance Declarations 
 
 What is the relationship between poverty and Supplemental Nutrition Assistance Program (SNAP) rates across counties in Texas that received Major Housing Assistance (HA) declarations? It may not be as straight-forward as it seems, but this document seeks to provide insight into the communities impacted by disasters by attempting to answer the above question, plus a few more: 
 
@@ -33,8 +33,6 @@ What is the relationship between poverty and Supplemental Nutrition Assistance P
 # But First, Data Prep 
 
 ```{r loadlibs}
-#| message: false
-#| warning: false
 library(rfema)
 library(censusapi)
 library(dotenv)
@@ -42,6 +40,11 @@ library(dplyr)
 library(ggplot2) 
 library(plotly) 
 library(sf)
+library(knitr)
+library(leaflet)
+library(stringr)
+library(tidyr)
+library(scales)
 ```
 
 Data used in this exercise come from multiple sources, but are primarily FEMA and Census data. 
@@ -54,7 +57,7 @@ Data used in this exercise come from multiple sources, but are primarily FEMA an
 
 ## FEMA Data
 
-FEMA Data are accessed using the R package {rfema}. This package provides a convenient wrapper for FEMA's open API. We can see below how many counties are impacted by each disaster we have for the TX data. 
+FEMA Data are accessed using the R package {`rfema`}. This package provides a convenient wrapper for FEMA's open API. We can see below how many counties are impacted by each disaster we have for the TX data. 
 
 ```{r femapull}
 
@@ -79,14 +82,14 @@ fema_disasters <- open_fema(data_set = "DisasterDeclarationsSummaries",
                             filter = disaster_numbers)
 
 # quick look to see what we have 
-table(fema_disasters$disasterNumber)
+kable(t(table(fema_disasters$disasterNumber)))
 
 ```
 
 
 ## Census Data 
 
-Fortunately, there are also packages ({censusapi}, {tigris}) that makes it really easy to pull data via the Census APIs. 
+Fortunately, there are also packages ({`censusapi`}, {`tigris`}) that makes it really easy to pull data via the Census APIs. 
 
 The first part of this requires a key, so we'll load that quickly using `load_dot_env(".env")` to load the .env so we can access it using the `Sys.getenv("CENSUS_KEY")` I set up previously. 
 
@@ -94,7 +97,7 @@ We'll pull 2015-2020 data (as we did with FEMA info), but need to specify the ye
 
 ```{r censuspull}
 
-load_dot_env(".env")
+#load_dot_env(".env")
 # Place to save the results 
 year_list <- list()
 
@@ -120,31 +123,393 @@ for (i in 1:length(years)) {
 }
 
 # combine to one dataframe
-all_years <- do.call(rbind, year_list)
+census_all_years <- do.call(rbind, year_list)
 
 ```
 
-Then we can pull the county shapefile from the TIGER API and put a quick plot together to make sure things look okay. 
+Then we can pull the county shapefile from the TIGER API specifying the state. 
 
-```{r tigerpull, fig.width=8}
+```{r tigerpull}
 #| message: false
 #| results: hide
 # specify the state - TX = 48
 tx_counties <- tigris::counties(state = "48", 
                                 cb = TRUE)
+```
 
-# quick plot 
-ggplot(data = tx_counties) + 
-  geom_sf() + 
-  theme_minimal()
+# Data Processing
+
+Now that we have have all our data gathered up, we can go ahead and do a little bit of processing. This will include deriving some variables and also merging our datasets so we can really start to dive in and examine what is going on with poverty and SNAP rates in HA declaration counties. 
+
+## FEMA Data 
+
+For this data, we'll need generate a few variables: 
+
+* Year - this will be pulled from the `designatedDate` field
+* County Code - this is the last three digits in the `placeCode`
+* Incident Type - we'll add this from the `Declaration Summaries` data set
+
+We can take a quick look at the data we'll be using, then proceed. 
+```{r femaprocess}
+
+
+## Deriving vars for FEMA 
+# Year 
+fema_dec_areas$year <-  str_sub(fema_dec_areas$designatedDate, 1, 4)
+
+# County code
+fema_dec_areas$county_code <-  str_sub(fema_dec_areas$placeCode, -3, -1)
+
+# Incident type 
+fema_dec_areas <- merge(fema_dec_areas, 
+                        unique(fema_disasters[, c("disasterNumber", "incidentType")]), 
+                        by = "disasterNumber", 
+                        all.x = T)
+
+fema_dec_areas
 
 ```
 
-You can add options to executable code like this 
+## Census Data 
 
-```{r}
-#| echo: false
-2 * 2
+To calculate rates for this data, we'll also need the number of households for each strata (county in this case) instead of comparing absolute numbers. If you were watching carefully, that was the extra variable sent in the request (`S2201_C01_001E`). Since we added `year` during the API call, there are four other variables we'll generate here: 
+
+* County Code - so we can match up with FEMA and the shapefile data; derived from `GEO_ID`
+* Poverty Rate - *n* households below poverty in the last 12 months / total households 
+* SNAP Rate  - *n* households receiving SNAP benefits / total households
+* Poverty Rate:Snap Rate - ratio of poverty to snap rates for each county and year
+
+
+```{r censusprocess}
+
+# Deriving vars for Census - dplyr syntax
+census_all_years <- census_all_years %>% 
+  mutate(county_code = str_sub(GEO_ID, -3, -1), 
+         pov_rate = S2201_C01_021E / S2201_C01_001E, 
+         snap_rate = S2201_C03_001E / S2201_C01_001E, 
+         pov_snap_ratio = pov_rate / snap_rate)
+
+census_all_years
+
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+## Merging 
+
+Finally, we can start to combine some of the data sources. 
+
+We'll start by combining the Census and FEMA data so we can tag which counties were included in HA declarations. 
+
+```{r merge}
+
+# merge Census and FEMA 
+census_fema <- merge(census_all_years, 
+                     fema_dec_areas[, c("disasterNumber", "placeName", "designatedDate", "year", "county_code", "incidentType")], 
+                     by = c("county_code", "year"), 
+                     all.x = T)
+
+```
+
+So we actually ended up with multiple entries for some of the county/year combos, which would affect our analysis downstream (eg., county level rates would get calculated twice). To fix this, we'll make a flag indicating if the county/year was affected, sum the number of disasters for those with multiple, and collapse the `incidentType` and `disasterNumber` fields so we don't lose that reference info. 
+
+One other thing we'll add while we're modifying this data is a flag across all counties that have been impacted by any declaration throughout the time series.
+
+```{r merge1}
+
+# Bringing the data back to reflect only one instances for county/year
+# by collapsing the multiple values merged from FEMA declarations
+census_fema <- census_fema %>%
+  mutate(dis_flag = ifelse(!is.na(disasterNumber), 1, 0)) %>% # ungrouped mutate to act as a counter 
+  group_by(county_code, year) %>% # group to reduce 
+  mutate(disasterNumber = paste(unique(disasterNumber), collapse = ","), # collapse unique variables 
+         designatedDate = paste(unique(designatedDate), collapse = ","), 
+         incidentType = paste(unique(incidentType), collapse = ","), 
+         n_disasters = sum(dis_flag)
+         ) %>%
+  filter(!duplicated(paste0(county_code, ".", year))) %>% # remove the duplicate rows to bring us back down to the original #
+  ungroup() %>% 
+  group_by(county) %>% # regroup data by only county 
+  mutate(dis_cnty = ifelse(any(!is.na(placeName)), 1, 0) # flag if county had a disaster 
+         )
+# a quick look at counties with/without disaster decs
+kable(
+  census_fema %>%
+    group_by(dis_cnty == 1) %>%
+    summarize(n_counties = n_distinct(county_code))
+)
+
+```
+
+We can also quickly take a look at our geometries from the Texas counties shapefile and merge on our HA declarations to see where those occurred. This will include a couple different maps - state geometry, counties for individual disasters, and all counties merged that had any disaster. 
+
+
+
+```{r tigerplot, fig.width=10, fig.height=10}
+
+# get a state outline geometry
+tx_state <- tx_counties %>%
+  group_by(STATEFP) %>%
+  summarize(geometry = st_union(geometry))
+
+
+# merge disasters with the 
+tx_disasters <- merge(tx_counties, 
+                     unique(fema_disasters[, c("disasterNumber", "fipsCountyCode")]), 
+                     by.x = "COUNTYFP", 
+                     by.y = "fipsCountyCode"
+                     )
+
+tx_disasters <- tx_disasters %>% 
+  st_as_sf() %>%
+  group_by(disasterNumber) %>%
+  summarize(geometry = st_union(geometry))
+
+# and we can also have a useful layer for all disasters combined across all years 
+tx_anydisaster <- tx_disasters %>%
+  st_as_sf() %>%
+  summarize(geometry = st_union(geometry))
+
+# # quick plot 
+# disaster_map <- ggplot() + 
+#   geom_sf(data = tx_state, color = "black", fill = NA) +
+#   geom_sf(data = tx_disasters, aes(fill = as.character(disasterNumber)), alpha = 0.5) +    
+#   theme_minimal() + 
+#   theme(plot.title = element_text(hjust = 0.5, size = 15), 
+#         axis.text =  element_text(size = 12), 
+#         axis.title = element_text(size = 14), 
+#         strip.text = element_text(size = 12), 
+#         legend.title = element_blank())
+#   
+#   
+#   
+# ggplotly(disaster_map)
+
+
+# or make it leaflet 
+# add palette for the individual disasters
+dis_pal <- colorFactor(topo.colors(5), tx_disasters$disasterNumber)
+
+leaflet() %>%
+  addTiles() %>%
+  addPolygons(data = tx_disasters, 
+              stroke = FALSE, 
+              color = ~dis_pal(disasterNumber), 
+              fillOpacity = 0.3,
+              popup = tx_disasters$disasterNumber, 
+              group = "Disasters") %>%
+  addPolygons(data = tx_anydisaster, 
+              stroke = FALSE, 
+              fillOpacity = 0.8, 
+              popup = "Any Disaster", 
+              group = "Any") %>%
+  addLayersControl(
+    baseGroups = c("Disasters", "Any"), 
+    position = "bottomleft", 
+    options = layersControlOptions(collapsed = F)
+  ) %>%
+  addLegend(position = "topright", 
+            pal = dis_pal, 
+            values = tx_disasters$disasterNumber)
+  
+
+
+```
+
+
+# Quick EDA 
+
+Now that we're all set up with data prep, we can dive into the data a bit more. For any new data, I usually check it out to see what we're working with. This involves asking more general questions like: 
+
+1. How many disasters per year?
+2. How many counties were affected by each disaster? And how many counties were affected in total? 
+3. What is the distribution of the variables we're interested in (# households, poverty rate, SNAP rates)?
+
+```{r eda1}
+# first lets get an idea of the number of disasters per year 
+# I like dplyr/ggplot for this since I can pipe altered data directly to the plot 
+ggplotly(
+fema_dec_areas %>% 
+  group_by(year) %>% 
+  summarize(n_disasters = n_distinct(disasterNumber)) %>%
+  ggplot(.) + 
+    geom_bar(aes(x = year, y = n_disasters), stat = "identity") +
+    labs(x = "Year", y = "Number Disasters", title = "Disaster Decs per Year in Texas, 2015-2020") +
+    theme_minimal() + 
+    theme(plot.title = element_text(hjust = 0.5, size = 15), 
+        axis.text =  element_text(size = 12), 
+        axis.title = element_text(size = 14), 
+        strip.text = element_text(size = 12), 
+        legend.title = element_blank())
+)
+
+```
+
+And getting a look at the number of counties impacted by each disaster, and a brief description of each disaster. 
+
+```{r eda2}
+
+# how many disasters per year? and total disasters 
+fema_dec_areas %>%
+  filter(!is.na(disasterNumber)) %>%
+  group_by(disasterNumber, incidentType) %>% 
+  summarize(n_counties = n_distinct(county_code)) 
+
+```
+
+Getting a closer look at the distributions of the poverty and SNAP rates, as well as the ratio between those two, you can see that the range of poverty rates is a little higher than that of SNAP rates, and there appear to be some counties with disaster declarations that have a far higher poverty rate than SNAP rate.
+```{r eda3}
+ggplotly(
+census_fema  %>%
+  filter(dis_cnty == 1) %>%
+  select(c(pov_rate, snap_rate, pov_snap_ratio)) %>%
+  pivot_longer(c(pov_rate, snap_rate, pov_snap_ratio)) %>%
+  mutate(names_f = factor(name)) %>%
+ggplot(.) + 
+  geom_density(aes(x = value), fill = 'red', alpha = 0.6) + 
+  labs(x = "Rate", y = "Density") + 
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 15), 
+      axis.text =  element_text(size = 12), 
+      axis.title = element_text(size = 14), 
+      strip.text = element_text(size = 12), 
+      legend.title = element_blank()) +
+  facet_wrap(~names_f, scales = "free")
+)
+```
+In particular, I'm interested in the variation of the Poverty:SNAP ratio over time for counties that have had a HA declaration. We can calculate the standard deviation and coefficient of variation for each county for all years, and plot those to visually inspect for any outliers that might have a larger variation over time. I wouldn't expect the ratio to change much over time, but it might give us something to look into in the future. 
+
+```{r eda4}
+# looking at variation of the ratio over time - std deviation and coefficient of variation
+variation_dat <- census_fema %>% 
+  filter(dis_cnty == 1) %>%
+  group_by(county_code) %>%
+  summarize(st_dev = sd(pov_snap_ratio), 
+            cv = (sd(pov_snap_ratio / mean(pov_snap_ratio)) * 100))
+
+ggplotly(
+ggplot(variation_dat) + 
+  geom_point(aes(x = st_dev, y = county_code)) +
+  labs(x = "Standard Deviation", y = "") +
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 15), 
+        axis.text =  element_text(size = 12), 
+        axis.title = element_text(size = 14), 
+        strip.text = element_text(size = 12), 
+        legend.title = element_blank())
+)
+
+ggplotly(
+  ggplot(variation_dat) + 
+    geom_point(aes(x = cv, y = county_code)) +
+    labs(x = "Coefficient of Variation", y = "") + 
+    theme_minimal() + 
+    theme(plot.title = element_text(hjust = 0.5, size = 15), 
+        axis.text =  element_text(size = 12), 
+        axis.title = element_text(size = 14), 
+        strip.text = element_text(size = 12), 
+        legend.title = element_blank())
+)
+
+
+```
+
+
+# Analysis
+
+Now for a visualization tool that compares the poverty and SNAP rates across counties in Texas that received Major Housing Assistance declarations. 
+
+For this, we'll build a choropleth map. These are really nice analytical tools that are easy to interpret when comparing rates across a geography. I've implemented this using the {`leaflet`} package, which provides nice basemap tiles and has a lot of customization available. 
+
+A quick caveat - I'm taking the mean poverty and SNAP rates to generate a ratio representing the poverty to SNAP ratio over the entire 5 year period for ease of displaying the data. 
+
+```{r choroprep, fig.width = 9, fig.height = 9}
+# generate means across years and ratio from the mean values 
+mean_rates <- census_fema %>%
+  filter(dis_cnty == 1) %>%
+  group_by(county_code) %>%
+  summarize(mean_pov_rate = mean(pov_rate), 
+            mean_SNAP_rate = mean(snap_rate), 
+            overall_ratio = (mean(pov_rate) / mean(snap_rate)))
+
+# merge with the spatial data 
+tx_ratios <- merge(tx_counties, 
+                   mean_rates, 
+                   by.x = "COUNTYFP", 
+                   by.y = "county_code", 
+                   all.x = T)
+
+p1 <- ggplot() + 
+  geom_sf(data = tx_state, color = "black", fill = NA) +
+  geom_sf(data = tx_ratios, aes(fill = overall_ratio), alpha = 0.8) +
+  scale_fill_distiller(palette = "Spectral", breaks = pretty_breaks(n = 4)) +
+  labs(title = "Poverty Rate:SNAP Rate for TX Counties \nwith HA Declarations, 2015-2020") +
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 15), 
+        axis.text =  element_text(size = 12), 
+        axis.title = element_text(size = 14), 
+        strip.text = element_text(size = 12), 
+        legend.title = element_blank())
+ggplotly(p1)
+```
+
+We can also build a model to assess the strength and direction of the correlation between the poverty and SNAP rates. The plot below shows a simple linear model, with SNAP rates as a function of poverty rates. 
+
+The second plot below examines the poverty:snap ratio across all counties with a HA declaration. Looking at this from the perspective of a person implementing the SNAP program, I would be very curious about the orange (ratio < 0.95) and red (ratio > 1.05) because they indicate that there is more households receiving snap benefit than may be eligible (though as I understand there are multiple ways to become eligible, not solely being under the poverty line) and there are many households that may be eligible but are not taking advantage of the SNAP benefit, respectively. 
+```{r addtlanalysis}
+# also build a model of the poverty and snap rates 
+lm_eqn <- function(df, y, x){
+    m <- lm(y ~ x, df);
+    eq <- substitute(italic(y) == a + b %.% italic(x)*","~~italic(r)^2~"="~r2, 
+         list(a = format(unname(coef(m)[1]), digits = 2),
+              b = format(unname(coef(m)[2]), digits = 2),
+             r2 = format(summary(m)$r.squared, digits = 3)))
+    as.character(as.expression(eq));
+}
+
+pov_mod <- lm(mean_SNAP_rate ~ mean_pov_rate, data = mean_rates)
+
+p2 <- ggplot(mean_rates) + 
+  geom_point(aes(x = mean_pov_rate, y = mean_SNAP_rate)) + 
+  geom_smooth(aes(x = mean_pov_rate, y = mean_SNAP_rate), 
+              method = "lm") + 
+  geom_text(aes(x = 0.1, y = 0.25), 
+            label = lm_eqn(mean_rates, mean_rates$mean_SNAP_rate,mean_rates$mean_pov_rate), 
+            parse = T) +
+  labs(title = "Correlation Between SNAP and Poverty Rates", x = "Mean Poverty Rate", 
+       y = "Mean SNAP Rate") +
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 15), 
+        axis.text =  element_text(size = 12), 
+        axis.title = element_text(size = 14), 
+        strip.text = element_text(size = 12), 
+        legend.title = element_blank())
+  
+  
+# and finally a plot of the ratios 
+ratio_comps <- mean_rates %>% 
+  arrange(overall_ratio) %>%
+  mutate(county = factor(county_code, levels=county_code)) 
+
+p3 <- ggplot(ratio_comps) +
+  geom_point(aes(y = county, x = overall_ratio), 
+             color = ifelse(ratio_comps$overall_ratio < 0.95, "orange", 
+                            ifelse(ratio_comps$overall_ratio > 1.05, "red", 
+                                   "green"))) +
+  geom_vline(xintercept = 1, linewidth = 1.2) +
+  labs(title = "Poverty:SNAP Ratio Across Counties", x = "Poverty:SNAP Ratio", 
+       y = "County Code") +
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 15), 
+        axis.text =  element_text(size = 12), 
+        axis.title = element_text(size = 14), 
+        strip.text = element_text(size = 12), 
+        legend.title = element_blank())
+
+p2
+ggplotly(p3)
+```
+    
+    
+# Other ways forward
+If I had more time, I would've liked to do perform more robust analysis to see how rates changed in years where the disaster actually occurred as opposed to just using all years. Another interesting thing to look at would be to compare the rates of poverty/SNAP against counties without any declarations, or include other aspects of the counties (urban vs. rural, population growth, etc.) to see how those also affect poverty and SNAP rates. 
+
+To accomplish this task in particular, there are other tools that could provide interesting insight, such as things to look at temporal autocorrelation in poverty/SNAP rates or examining the data for pockets of spatial patterns (eg., clusters of high/low poverty:SNAP ratios). 
