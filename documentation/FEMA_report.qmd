@@ -417,7 +417,7 @@ ggplotly(
 
 Now for a visualization tool that compares the poverty and SNAP rates across counties in Texas that received Major Housing Assistance declarations. 
 
-For this, we'll build a choropleth map. These are really nice analytical tools that are easy to interpret when comparing rates across a geography. I've implemented this using the {`leaflet`} package, which provides nice basemap tiles and has a lot of customization available. 
+For this, we'll build a choropleth map. These are really nice analytical tools that are easy to interpret when comparing rates across a geography. I've implemented this using the `ggplot2` and `plotly` packages, which provide a lot of flexibility. 
 
 A quick caveat - I'm taking the mean poverty and SNAP rates to generate a ratio representing the poverty to SNAP ratio over the entire 5 year period for ease of displaying the data. 
 
